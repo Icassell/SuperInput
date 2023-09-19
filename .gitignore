@@ -1,5 +1,14 @@
+# Unreal Files
+LocalContent/
+__ExternalActors__/
+__ExternalObjects__/
+
+# Rider Files
+.idea/
+
 # Visual Studio 2015 user specific files
 .vs/
+.vsconfig
 
 # Compiled Object files
 *.slo
