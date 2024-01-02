@@ -9,11 +9,8 @@
 enum class ETriggerEvent : uint8;
 class UInputAction;
 
-/**
- * 
- */
 UCLASS()
-class ENHANCEDUMG_API UEnhancedButton : public UButton, public FTickableGameObject
+class ENHANCEDUMG_API UEnhancedButton : public UButton
 {
 	GENERATED_BODY()
 
@@ -26,31 +23,35 @@ protected:
 	virtual TSharedRef<SWidget> RebuildWidget() override;
 	virtual void BeginDestroy() override;
 	// End of UWidget interface
-
-	// FTickableGameObject interface
-	virtual bool IsTickable() const override;
-	virtual void Tick(float DeltaTime) override;
-	virtual TStatId GetStatId() const override;
-	// End of FTickableGameObject interface
 	
 protected:
-	void BindPressedIA();
-	void RemovePressedIA();
+	void BindButtonActions();
+	void RemoveButtonActions();
+
+	void OnClickedIATrigger();
 	void OnPressedIATrigger();
+	void OnHoveredIATrigger();
 
-	void InjectInputValue_Bool(UInputAction* InjectAction, bool InjectValue);
-
+	FReply SlateHandleClickedOverride();
 	void SlateHandlePressedOverride();
 	void SlateHandleReleasedOverride();
-
+	void SlateHandleHoveredOverride();
+	void SlateHandleUnhoveredOverride();
+	
+	TArray<ETriggerEvent> FindEventsForAction(UInputAction* Action);
+	void StartInputInjectionForAction(UInputAction* Action);
+	void StopInputInjectionForAction(UInputAction* Action);
+	
 protected:
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	UPROPERTY(EditAnywhere)
+	TObjectPtr<UInputAction> ClickedAction;
+	
+	UPROPERTY(EditAnywhere)
 	TObjectPtr<UInputAction> PressedAction;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	ETriggerEvent PressedTriggerEvent;
+	UPROPERTY(EditAnywhere)
+	TObjectPtr<UInputAction> HoveredAction;
 
 private:
-	uint32 PressedHandleIndex = -1;
-	bool bPressedTick = false;
+	TArray<uint32> ButtonActionHandleIndexArray;
 };

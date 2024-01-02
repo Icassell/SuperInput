@@ -3,28 +3,30 @@
 
 #include "EnhancedButton.h"
 
+
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Components/ButtonSlot.h"
 #include "Kismet/GameplayStatics.h"
 #include "Widgets/Input/SButton.h"
 
+
 void UEnhancedButton::PostInitProperties()
 {
 	Super::PostInitProperties();
 
-	BindPressedIA();
+	BindButtonActions();
 }
 
 TSharedRef<SWidget> UEnhancedButton::RebuildWidget()
 {
 	PRAGMA_DISABLE_DEPRECATION_WARNINGS
 	MyButton = SNew(SButton)
-		.OnClicked(BIND_UOBJECT_DELEGATE(FOnClicked, SlateHandleClicked))
-		.OnPressed(BIND_UOBJECT_DELEGATE(FSimpleDelegate, UEnhancedButton::SlateHandlePressedOverride)) //替换基类slate绑定回调
-		.OnReleased(BIND_UOBJECT_DELEGATE(FSimpleDelegate, UEnhancedButton::SlateHandleReleasedOverride)) //替换基类slate绑定回调
-		.OnHovered_UObject(this, &ThisClass::SlateHandleHovered)
-		.OnUnhovered_UObject(this, &ThisClass::SlateHandleUnhovered)
+		.OnClicked(BIND_UOBJECT_DELEGATE(FOnClicked, UEnhancedButton::SlateHandleClickedOverride))
+		.OnPressed(BIND_UOBJECT_DELEGATE(FSimpleDelegate, UEnhancedButton::SlateHandlePressedOverride))
+		.OnReleased(BIND_UOBJECT_DELEGATE(FSimpleDelegate, UEnhancedButton::SlateHandleReleasedOverride))
+		.OnHovered_UObject(this, &UEnhancedButton::SlateHandleHoveredOverride)
+		.OnUnhovered_UObject(this, &UEnhancedButton::SlateHandleUnhoveredOverride)
 		.ButtonStyle(&WidgetStyle)
 		.ClickMethod(ClickMethod)
 		.TouchMethod(TouchMethod)
@@ -43,102 +45,180 @@ void UEnhancedButton::BeginDestroy()
 {
 	Super::BeginDestroy();
 
-	RemovePressedIA();
+	RemoveButtonActions();
 }
 
-bool UEnhancedButton::IsTickable() const
+void UEnhancedButton::BindButtonActions()
 {
-	if (MyButton.IsValid() && IsVisible())
-	{
-		return true;
-	}
-	
-	return false;
-}
-
-void UEnhancedButton::Tick(float DeltaTime)
-{
-	//UE_LOG(LogTemp, Log, TEXT("Button Ticking!"));
-	InjectInputValue_Bool(PressedAction, bPressedTick);
-}
-
-TStatId UEnhancedButton::GetStatId() const
-{
-	return Super::GetStatID();
-}
-
-void UEnhancedButton::BindPressedIA()
-{
-	if (!PressedAction) return;
 	if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
 	{
 		if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PC->InputComponent))
 		{
-			PressedHandleIndex = EnhancedInputComponent->BindAction(PressedAction, PressedTriggerEvent, this, &UEnhancedButton::OnPressedIATrigger).GetHandle();
-		}
-	}
-}
-
-void UEnhancedButton::RemovePressedIA()
-{
-	if (!PressedAction) return;
-	if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
-	{
-		if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PC->InputComponent))
-		{
-			EnhancedInputComponent->RemoveBindingByHandle(PressedHandleIndex);
-		}
-	}
-}
-
-void UEnhancedButton::OnPressedIATrigger()
-{
-	//真正调用回调的部分
-	OnPressed.Broadcast();
-
-	//手动触发IA的值变化
-	bPressedTick = false;
-	InjectInputValue_Bool(PressedAction, bPressedTick);
-}
-
-void UEnhancedButton::InjectInputValue_Bool(UInputAction* InjectAction, bool InjectValue)
-{
-	if (!InjectAction) return;
-	if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
-	{
-		if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
-		{
-			if (UEnhancedInputLocalPlayerSubsystem* Sys = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
+			for (auto Event : this->FindEventsForAction(ClickedAction))
 			{
-				const FInputActionValue ActionValue(InjectValue);
-				Sys->InjectInputForAction(InjectAction, ActionValue, InjectAction->Modifiers, InjectAction->Triggers);
+				uint32 Index = EnhancedInputComponent->BindAction(ClickedAction, Event, this, &UEnhancedButton::OnClickedIATrigger).GetHandle();
+				if (Index != 0)
+				{
+					ButtonActionHandleIndexArray.Add(Index);
+				}
+			}
+			for (auto Event : this->FindEventsForAction(PressedAction))
+			{
+				uint32 Index = EnhancedInputComponent->BindAction(PressedAction, Event, this, &UEnhancedButton::OnPressedIATrigger).GetHandle();
+				if (Index != 0)
+				{
+					ButtonActionHandleIndexArray.Add(Index);
+				}
+			}
+			for (auto Event : this->FindEventsForAction(HoveredAction))
+			{
+				uint32 Index = EnhancedInputComponent->BindAction(HoveredAction, Event, this, &UEnhancedButton::OnHoveredIATrigger).GetHandle();
+				if (Index != 0)
+				{
+					ButtonActionHandleIndexArray.Add(Index);
+				}
 			}
 		}
 	}
 }
 
+void UEnhancedButton::RemoveButtonActions()
+{
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	{
+		if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PC->InputComponent))
+		{
+			for (auto Index : ButtonActionHandleIndexArray)
+			{
+				EnhancedInputComponent->RemoveBindingByHandle(Index);
+			}
+		}
+	}
+}
+
+void UEnhancedButton::OnClickedIATrigger()
+{
+	Super::SlateHandleClicked();
+	
+	this->StopInputInjectionForAction(ClickedAction);
+}
+
+void UEnhancedButton::OnPressedIATrigger()
+{
+	Super::SlateHandlePressed();
+	
+	this->StopInputInjectionForAction(PressedAction);
+}
+
+void UEnhancedButton::OnHoveredIATrigger()
+{
+	Super::SlateHandleHovered();
+
+	this->StopInputInjectionForAction(HoveredAction);
+}
+
+FReply UEnhancedButton::SlateHandleClickedOverride()
+{
+	if (ClickedAction == nullptr)
+	{
+		return Super::SlateHandleClicked();
+	}
+
+	this->StartInputInjectionForAction(ClickedAction);
+
+	return FReply::Handled();
+}
+
 void UEnhancedButton::SlateHandlePressedOverride()
 {
-	if (!PressedAction || PressedHandleIndex == -1)
+	if (PressedAction == nullptr)
 	{
-		Super::SlateHandlePressed();
+		return Super::SlateHandlePressed();
 	}
-	else
-	{
-		//Begin Tick
-		bPressedTick = true;
-		InjectInputValue_Bool(PressedAction, bPressedTick);
-	}
+
+	this->StartInputInjectionForAction(PressedAction);
 }
 
 void UEnhancedButton::SlateHandleReleasedOverride()
 {
 	Super::SlateHandleReleased();
 
-	if (PressedAction)
+	this->StopInputInjectionForAction(PressedAction);
+}
+
+void UEnhancedButton::SlateHandleHoveredOverride()
+{
+	if (HoveredAction == nullptr)
 	{
-		//End Tick
-		bPressedTick = false;
-		InjectInputValue_Bool(PressedAction, bPressedTick);
+		return Super::SlateHandleHovered();
+	}
+
+	this->StartInputInjectionForAction(HoveredAction);
+}
+
+void UEnhancedButton::SlateHandleUnhoveredOverride()
+{
+	Super::SlateHandleUnhovered();
+
+	this->StopInputInjectionForAction(HoveredAction);
+}
+
+TArray<ETriggerEvent> UEnhancedButton::FindEventsForAction(UInputAction* Action)
+{
+	TArray<ETriggerEvent> Events;
+	if (Action == nullptr) return Events;
+
+	if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+	{
+		if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PC->InputComponent))
+		{
+			for (auto& Binding : EnhancedInputComponent->GetActionEventBindings())
+			{
+				if (Binding->GetAction() == Action)
+				{
+					Events.Add(Binding->GetTriggerEvent());
+				}
+			}
+		}
+	}
+
+	//AGamePlayerController::ReBindEvents()
+	if(Events.IsEmpty())
+		Events.Add(ETriggerEvent::Triggered);
+	
+	return Events;
+}
+
+void UEnhancedButton::StartInputInjectionForAction(UInputAction* Action)
+{
+	if (Action)
+	{
+		if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+		{
+			if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+			{
+				if (UEnhancedInputLocalPlayerSubsystem* Sys = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
+				{
+					Sys->StartContinuousInputInjectionForAction(Action, FInputActionValue(true), Action->Modifiers, Action->Triggers);
+				}
+			}
+		}
+	}
+}
+
+void UEnhancedButton::StopInputInjectionForAction(UInputAction* Action)
+{
+	if (Action)
+	{
+		if (APlayerController* PC = UGameplayStatics::GetPlayerController(GetWorld(), 0))
+		{
+			if (ULocalPlayer* LocalPlayer = PC->GetLocalPlayer())
+			{
+				if (UEnhancedInputLocalPlayerSubsystem* Sys = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
+				{
+					Sys->StopContinuousInputInjectionForAction(Action);
+				}
+			}
+		}
 	}
 }
